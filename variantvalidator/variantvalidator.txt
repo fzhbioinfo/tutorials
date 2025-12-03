@@ -1,0 +1,103 @@
+###########################variantvalidator######################################
+### 下载sql
+wget https://data.variantvalidator.org/vvdata/validator/validator_2025_03.sql.gz
+wget https://data.variantvalidator.org/vvdata/vvta/vvta_2025_02_no_seq.sql.gz
+wget https://data.variantvalidator.org/vvdata/vv_seqrepo/VV_SR_2025_02.tar
+gunzip validator_2025_03.sql.gz
+
+### validator mysql
+mysql -h 127.0.0.1 -P 3306 -u root -p
+mysql> CREATE USER 'vvadmin'@'localhost' IDENTIFIED BY 'FZHyyds2020';
+mysql> CREATE DATABASE validator;
+mysql> GRANT ALL PRIVILEGES ON validator.* TO 'vvadmin'@'localhost';
+mysql> FLUSH PRIVILEGES;
+mysql> SHOW GRANTS FOR 'vvadmin'@'localhost';
+mysql validator < validator_2025_03.sql -h 127.0.0.1 -P 3306 -u vvadmin -p
+
+### validator seqrepo
+mkdir seqrepo
+mv VV_SR_2025_02.tar seqrepo
+cd seqrepo
+tar -xvf VV_SR_2025_02.tar
+
+### validator postgres
+# 初始化，创建超级用户和设置密码FZHyyds2020
+initdb -A md5 -U fangzhonghai -D /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/pg_data -W
+# 配置修改，参考https://dba.stackexchange.com/questions/83984/connect-to-postgresql-server-fatal-no-pg-hba-conf-entry-for-host
+echo -e "# TYPE  DATABASE        USER            CIDR-ADDRESS                 METHOD\nhost    all             all             0.0.0.0/0                    md5" >> pg_data/pg_hba.conf
+echo -e "listen_addresses = '*'" >> pg_data/postgresql.conf
+sed -i 's/max_connections = 100/max_connections = 1000/g' pg_data/postgresql.conf
+# 启动，指定端口
+pg_ctl -D /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/pg_data -l pg_data/logfile start -o "-p 6543"
+# 创建用户vvadmin
+createuser -p 6543 -U fangzhonghai uta_admin
+# 使用 psql 连接到运行在 6543 端口的 PostgreSQL 服务器的 template1数据库（可连接），修改用户密码，创建vvta数据库
+psql -p 6543 -d template1
+template1=# ALTER USER uta_admin PASSWORD 'FZHyyds2020';
+template1=# CREATE DATABASE vvta WITH OWNER=uta_admin TEMPLATE=template0;
+template1=# GRANT ALL PRIVILEGES ON DATABASE vvta TO uta_admin;
+template1=# \q
+# 导入库，Postgres >= version 14.0
+gzip -cdq vvta_2025_02_no_seq.sql.gz | sed 's/anyarray/anycompatiblearray/g' | psql -p 6543 -U uta_admin -v ON_ERROR_STOP=1 -d vvta -Eae
+
+### biocommons hgvs
+# 查看postgresql服务器ip，ip为：10.192.40.7
+ip addr
+# 设置UTA和SEQREPO
+export UTA_DB_URL=postgresql://uta_admin:FZHyyds2020@10.192.40.7:6543/vvta/vvta_2025_02
+export HGVS_SEQREPO_DIR=/ifstj2/B2C_RD_S1/USER/fangzhonghai/software/vv_data/seqrepo/VV_SR_2025_02/master
+# 测试
+python3
+>>> import hgvs.dataproviders.uta
+>>> import hgvs.assemblymapper
+>>> import hgvs.parser
+>>> hdp = hgvs.dataproviders.uta.connect()
+>>> am = hgvs.assemblymapper.AssemblyMapper(hdp, assembly_name='GRCh37', alt_aln_method='splign', replace_reference=True)
+>>> hp = hgvs.parser.Parser()
+>>> c = 'NM_004985.4:c.-160A>G'
+>>> var_c = hp.parse_c_variant(c)
+>>> var_g = am.c_to_g(var_c)
+>>> print(var_g)
+NC_000012.11:g.25403833T>C
+
+### variantValidator
+git clone https://github.com/openvar/variantValidator.git
+cd variantValidator
+pip install .
+python bin/vv_configure.py
+# vi ~/.variantvalidator
+---------------------------------------------------------------------------------------------------------------------------------
+[mysql]
+host = 127.0.0.1
+#port = 3306
+database = validator
+port = 3306
+user = vvadmin
+password = FZHyyds2020
+version = vvdb_2025_3
+
+[seqrepo]
+version = VV_SR_2025_02/master
+location = /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/vv_data/seqrepo
+require_threading = False  # Set to True if you want to deploy VV in a web application
+
+[postgres]
+host = 127.0.0.1
+database = vvta
+port = 6543
+version = vvta_2025_02
+user = uta_admin
+password = FZHyyds2020
+
+[logging]
+# Levels control verbosity and can be set to "CRITICAL" "ERROR" "WARNING" "INFO" or "DEBUG".
+log = True
+console = INFO
+file = WARNING
+
+[Entrez]
+email = fzhbioinfo@163.com
+api_key = FZHyyds2020 # 没弄
+---------------------------------------------------------------------------------------------------------------------------------
+bin/variant_validator.py -h
+bin/variant_validator.py -v 'NC_000017.11:g.50198002C>A' -g GRCh38 -t mane -s individual -f json -m -o stdout

@@ -1,0 +1,44 @@
+# conf
+my.cnf：
+---------------------------------------------------------------------------------------------------------------------------------
+[client]
+port = 3306
+socket = /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/mysql_data/mysql.sock
+
+[mysqld]
+port = 3306
+socket = /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/mysql_data/mysql.sock
+datadir = /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/mysql_data
+log-error = /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/mysql_data/mysql_error.log
+pid-file = /ifstj2/B2C_RD_S1/USER/fangzhonghai/software/mysql_data/mysql.pid
+
+# 安全设置
+bind-address = 127.0.0.1
+skip-networking = false
+
+# 性能设置
+key_buffer_size = 256M
+max_allowed_packet = 1G
+thread_stack = 192K
+thread_cache_size = 8
+
+# 字符集
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+default-storage-engine = INNODB
+
+[mysql]
+default-character-set = utf8mb4
+---------------------------------------------------------------------------------------------------------------------------------
+# 启动
+nohup mysqld --defaults-file=/ifstj2/B2C_RD_S1/USER/fangzhonghai/software/mysql_data/my.cnf > mysql_data/mysql_console.log 2>&1 &
+# 改密码，创建库
+mysql -h 127.0.0.1 -P 3306 -u root -p
+mysql> ALTER USER 'root'@'localhost' IDENTIFIED BY 'FZHyyds2020';
+mysql> FLUSH PRIVILEGES;
+mysql> CREATE USER 'fangzhonghai'@'localhost' IDENTIFIED BY 'FZHyyds2020';
+mysql> FLUSH PRIVILEGES;
+mysql> CREATE DATABASE hgmd_pro;
+zcat /jdfstj4/B2C_RD_R1/fangzhonghai/pipeline/make_vep_db/HGMD.2025.3/hgmd_pro-2025.3.dump.gz| mysql -h 127.0.0.1 -P 3306 -u root -p hgmd_pro
+mysql -u root -P 3306 -h 127.0.0.1 -p hgmd_pro -e "SELECT * FROM allmut" > hgmd_pro_2025.3.allmut.csv
