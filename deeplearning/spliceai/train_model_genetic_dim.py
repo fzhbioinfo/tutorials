@@ -126,7 +126,7 @@ def run(args):
         LOGGER.info(f'Load weights from {args.checkpoint}')
         model.load_weights(args.checkpoint)
     # 创建模型检查点
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, restore_best_weights=True)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=2, verbose=1, restore_best_weights=True)
     check_point = ModelCheckpoint(filepath=args.checkpoint, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, save_freq='epoch')
     batch_size = 32
     initial_lr = 0.001
