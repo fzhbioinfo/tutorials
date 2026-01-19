@@ -13,6 +13,7 @@ from tensorflow.keras import Model
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.metrics import TopKCategoricalAccuracy
 import tensorflow.keras.backend as kb
+from tensorflow.keras.optimizers import Adam
 import tensorflow as tf
 
 
@@ -120,42 +121,51 @@ def run(args):
     dilation_rate = [1] * 4 + [4] * 4 + [10] * 4 + [25] * 4
     model = spliceai(filters, kernel_size, dilation_rate)
     print(model.summary())
-    # 编译模型，优化器使用Adam，损失函数使用交叉熵，评估指标使用准确率
-    model.compile(optimizer='adam', loss=categorical_crossentropy_2d, metrics=[TopKCategoricalAccuracy(k=1)])
     # 模型检查点如果存在，则加载权重
     if os.path.exists(args.checkpoint):
+        LOGGER.info(f'Load weights from {args.checkpoint}')
         model.load_weights(args.checkpoint)
     # 创建模型检查点
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, restore_best_weights=True)
     check_point = ModelCheckpoint(filepath=args.checkpoint, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, save_freq='epoch')
     batch_size = 32
-    h5f = h5py.File(args.dataset, 'r')
+    initial_lr = 0.001
+    decay_rate = 0.8
     num = count()
-    metrics = []
-    for x_train, y_train, x_valid, y_valid in generate_training_data(h5f):
-        history = model.fit(x_train, y_train, batch_size=batch_size, verbose=2, epochs=10, validation_data=(x_valid, y_valid), validation_freq=1, callbacks=[early_stopping, check_point])
-        y_train_pred = model.predict(x_train)
-        y_train_pred_acceptor = y_train_pred[:, :, 1].flatten()
-        y_train_pred_donor = y_train_pred[:, :, 2].flatten()
-        y_train_acceptor = y_train[:, :, 1].flatten()
-        y_train_donor = y_train[:, :, 2].flatten()
-        y_valid_pred = model.predict(x_valid)
-        y_valid_pred_acceptor = y_valid_pred[:, :, 1].flatten()
-        y_valid_pred_donor = y_valid_pred[:, :, 2].flatten()
-        y_valid_acceptor = y_valid[:, :, 1].flatten()
-        y_valid_donor = y_valid[:, :, 2].flatten()
-        _metrics = [
-            *cal_topk_accuracy(y_train_acceptor, y_train_pred_acceptor),
-            *cal_topk_accuracy(y_train_donor, y_train_pred_donor),
-            *cal_topk_accuracy(y_valid_acceptor, y_valid_pred_acceptor),
-            *cal_topk_accuracy(y_valid_donor, y_valid_pred_donor)]
-        metrics.append(_metrics)
-        LOGGER.info(f'Train & valid acc and donor metrics: {_metrics}')
-        with open(os.path.join(args.out_dir, f'history{next(num)}.pkl'), 'wb') as f:
-            pickle.dump(history.history, f)
-    columns = [f'{k}_{j}_{i}' for i in ['train', 'valid'] for j in ['acceptor', 'donor'] for k in ['average_precision', 'roc_auc', 'topk_accuracy', 'true_size', 'threshold']]
-    pd.DataFrame(metrics, columns=columns).to_csv(os.path.join(args.out_dir, 'metrics.tsv'), index=False, sep='\t')
-    h5f.close()
+    for epoch in range(10):
+        h5f = h5py.File(args.dataset, 'r')
+        metrics = []
+        if epoch:
+            lr = initial_lr * decay_rate
+        else:
+            lr = initial_lr
+        LOGGER.info(f'Epoch {epoch + 1}, learning rate: {lr}')
+        # 编译模型，优化器使用Adam，损失函数使用交叉熵，评估指标使用准确率
+        model.compile(optimizer=Adam(learning_rate=lr), loss=categorical_crossentropy_2d, metrics=[TopKCategoricalAccuracy(k=1)])
+        for x_train, y_train, x_valid, y_valid in generate_training_data(h5f):
+            history = model.fit(x_train, y_train, batch_size=batch_size, verbose=2, epochs=10, validation_data=(x_valid, y_valid), validation_freq=1, callbacks=[early_stopping, check_point])
+            y_train_pred = model.predict(x_train)
+            y_train_pred_acceptor = y_train_pred[:, :, 1].flatten()
+            y_train_pred_donor = y_train_pred[:, :, 2].flatten()
+            y_train_acceptor = y_train[:, :, 1].flatten()
+            y_train_donor = y_train[:, :, 2].flatten()
+            y_valid_pred = model.predict(x_valid)
+            y_valid_pred_acceptor = y_valid_pred[:, :, 1].flatten()
+            y_valid_pred_donor = y_valid_pred[:, :, 2].flatten()
+            y_valid_acceptor = y_valid[:, :, 1].flatten()
+            y_valid_donor = y_valid[:, :, 2].flatten()
+            _metrics = [
+                *cal_topk_accuracy(y_train_acceptor, y_train_pred_acceptor),
+                *cal_topk_accuracy(y_train_donor, y_train_pred_donor),
+                *cal_topk_accuracy(y_valid_acceptor, y_valid_pred_acceptor),
+                *cal_topk_accuracy(y_valid_donor, y_valid_pred_donor)]
+            metrics.append(_metrics)
+            LOGGER.info(f'Train & valid acc and donor metrics: {_metrics}')
+            with open(os.path.join(args.out_dir, f'history{next(num)}.pkl'), 'wb') as f:
+                pickle.dump(history.history, f)
+        columns = [f'{k}_{j}_{i}' for i in ['train', 'valid'] for j in ['acceptor', 'donor'] for k in ['average_precision', 'roc_auc', 'topk_accuracy', 'true_size', 'threshold']]
+        pd.DataFrame(metrics, columns=columns).to_csv(os.path.join(args.out_dir, f'metrics.{epoch}.tsv'), index=False, sep='\t')
+        h5f.close()
     model.save(os.path.join(args.out_dir, args.out))
 
 
