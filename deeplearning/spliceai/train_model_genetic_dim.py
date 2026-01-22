@@ -131,14 +131,13 @@ def run(args):
     batch_size = 32
     initial_lr = 0.001
     decay_rate = 0.8
+    lr = initial_lr
     num = count()
     for epoch in range(10):
         h5f = h5py.File(args.dataset, 'r')
         metrics = []
         if epoch:
-            lr = initial_lr * decay_rate
-        else:
-            lr = initial_lr
+            lr = lr * decay_rate
         LOGGER.info(f'Epoch {epoch + 1}, learning rate: {lr}')
         # 编译模型，优化器使用Adam，损失函数使用交叉熵，评估指标使用准确率
         model.compile(optimizer=Adam(learning_rate=lr), loss=categorical_crossentropy_2d, metrics=[TopKCategoricalAccuracy(k=1)])
